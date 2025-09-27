@@ -25,17 +25,19 @@ jobs:
           | docker login --username AWS --password-stdin ${{ secrets.ECR_REGISTRY }}
 
       - name: Build Docker Image
-        run: docker build -t ${{ secrets.ECR_REPOSITORY }} .
-
-      - name: Tag Docker Image
         run: |
           IMAGE_TAG=${{ github.sha }}
-          docker tag ${{ secrets.ECR_REPOSITORY }}:$IMAGE_TAG ${{ secrets.ECR_REGISTRY }}/${{ secrets.ECR_REPOSITORY }}:$IMAGE_TAG
-          docker tag ${{ secrets.ECR_REPOSITORY }}:$IMAGE_TAG ${{ secrets.ECR_REGISTRY }}/${{ secrets.ECR_REPOSITORY }}:latest
+          docker build -t ${{ secrets.ECR_REPOSITORY }}:$IMAGE_TAG \
+                       -t ${{ secrets.ECR_REPOSITORY }}:latest .
 
       - name: Push to ECR
         run: |
           IMAGE_TAG=${{ github.sha }}
+          docker tag ${{ secrets.ECR_REPOSITORY }}:$IMAGE_TAG \
+                     ${{ secrets.ECR_REGISTRY }}/${{ secrets.ECR_REPOSITORY }}:$IMAGE_TAG
+          docker tag ${{ secrets.ECR_REPOSITORY }}:latest \
+                     ${{ secrets.ECR_REGISTRY }}/${{ secrets.ECR_REPOSITORY }}:latest
+
           docker push ${{ secrets.ECR_REGISTRY }}/${{ secrets.ECR_REPOSITORY }}:$IMAGE_TAG
           docker push ${{ secrets.ECR_REGISTRY }}/${{ secrets.ECR_REPOSITORY }}:latest
 
@@ -44,6 +46,7 @@ jobs:
 
       - name: Deploy with SAM
         run: |
+          IMAGE_TAG=${{ github.sha }}
           sam deploy \
             --template-file template.yaml \
             --stack-name ecs-express-api-stack \
@@ -56,7 +59,8 @@ jobs:
               Subnet2=${{ secrets.SUBNET_2 }} \
               EcrRegistry=${{ secrets.ECR_REGISTRY }} \
               EcrRepository=${{ secrets.ECR_REPOSITORY }} \
-              AwsRegion=${{ secrets.AWS_REGION }}
+              AwsRegion=${{ secrets.AWS_REGION }} \
+              ImageTag=$IMAGE_TAG
 
       - name: Fetch ALB DNS from CloudFormation
         id: alb
@@ -65,4 +69,10 @@ jobs:
             --stack-name ecs-express-api-stack \
             --query "Stacks[0].Outputs[?OutputKey=='LoadBalancerDNS'].OutputValue" \
             --output text)
-          echo "ALB DNS: http://$ALB_DNS"
+          echo "✅ ALB DNS: http://$ALB_DNS"
+          echo "alb_dns=http://$ALB_DNS" >> $GITHUB_OUTPUT
+
+      - name: Verify API Health
+        run: |
+          echo "Checking /health endpoint..."
+          curl -v ${{ steps.alb.outputs.alb_dns }}/health || exit 1
