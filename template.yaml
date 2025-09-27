@@ -29,7 +29,7 @@ Resources:
       NetworkMode: awsvpc
       RequiresCompatibilities:
         - FARGATE
-      ExecutionRoleArn: arn:aws:iam::YOUR_ACCOUNT_ID:role/ecsTaskExecutionRole
+      ExecutionRoleArn: arn:aws:iam::864981759262:role/ecsTaskExecutionRole
       ContainerDefinitions:
         - Name: express-container
           Image: !Ref ImageUri
