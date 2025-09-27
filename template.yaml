@@ -1,5 +1,5 @@
 AWSTemplateFormatVersion: '2010-09-09'
-Description: ECS Fargate Service for Node.js Express API with ALB + Security Groups
+Description: ECS Fargate Service for Node.js Express API with proper SGs
 
 Parameters:
   VpcId:
@@ -34,12 +34,6 @@ Resources:
       ManagedPolicyArns:
         - arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
 
-  LogGroup:
-    Type: AWS::Logs::LogGroup
-    Properties:
-      LogGroupName: /ecs/ecs-express-api
-      RetentionInDays: 7
-
   TaskDefinition:
     Type: AWS::ECS::TaskDefinition
     Properties:
@@ -63,27 +57,39 @@ Resources:
               awslogs-region: !Ref AwsRegion
               awslogs-stream-prefix: ecs
 
+  LogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: /ecs/ecs-express-api
+      RetentionInDays: 7
+
   AlbSecurityGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
-      GroupDescription: Allow HTTP traffic from internet to ALB
+      GroupDescription: Allow HTTP from internet to ALB
       VpcId: !Ref VpcId
       SecurityGroupIngress:
         - IpProtocol: tcp
           FromPort: 80
           ToPort: 80
           CidrIp: 0.0.0.0/0
+      SecurityGroupEgress:
+        - IpProtocol: -1
+          CidrIp: 0.0.0.0/0
 
   EcsSecurityGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
-      GroupDescription: Allow ECS tasks traffic from ALB
+      GroupDescription: Allow traffic from ALB to ECS tasks
       VpcId: !Ref VpcId
       SecurityGroupIngress:
         - IpProtocol: tcp
           FromPort: 3000
           ToPort: 3000
           SourceSecurityGroupId: !Ref AlbSecurityGroup
+      SecurityGroupEgress:
+        - IpProtocol: -1
+          CidrIp: 0.0.0.0/0
 
   LoadBalancer:
     Type: AWS::ElasticLoadBalancingV2::LoadBalancer
@@ -105,8 +111,10 @@ Resources:
       Protocol: HTTP
       TargetType: ip
       HealthCheckPath: /health
-      Matcher:
-        HttpCode: 200
+      HealthyThresholdCount: 2
+      UnhealthyThresholdCount: 2
+      HealthCheckIntervalSeconds: 30
+      HealthCheckTimeoutSeconds: 5
 
   Listener:
     Type: AWS::ElasticLoadBalancingV2::Listener
