@@ -1,5 +1,5 @@
 AWSTemplateFormatVersion: '2010-09-09'
-Description: ECS Fargate Service for Node.js Express API
+Description: ECS Fargate Service for Node.js Express API with ALB health checks (commit SHA tagging)
 
 Parameters:
   VpcId:
@@ -16,6 +16,9 @@ Parameters:
     Type: String
   AwsRegion:
     Type: String
+  ImageTag:
+    Type: String
+    Description: "Unique Docker image tag (commit SHA)"
 
 Resources:
   Cluster:
@@ -48,10 +51,15 @@ Resources:
       ExecutionRoleArn: !GetAtt TaskExecutionRole.Arn
       ContainerDefinitions:
         - Name: ecs-express-container
-          Image: !Sub "${EcrRegistry}/${EcrRepository}:latest"
+          Image: !Sub "${EcrRegistry}/${EcrRepository}:${ImageTag}"
           Essential: true
           PortMappings:
             - ContainerPort: 3000
+          Environment:
+            - Name: PORT
+              Value: "3000"
+            - Name: APP_NAME
+              Value: "ecs-express-api"
 
   LoadBalancer:
     Type: AWS::ElasticLoadBalancingV2::LoadBalancer
@@ -77,6 +85,10 @@ Resources:
       HealthCheckPath: /health
       Matcher:
         HttpCode: 200
+      HealthyThresholdCount: 2
+      UnhealthyThresholdCount: 3
+      HealthCheckIntervalSeconds: 15
+      HealthCheckTimeoutSeconds: 5
 
   Listener:
     Type: AWS::ElasticLoadBalancingV2::Listener

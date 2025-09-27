@@ -25,19 +25,26 @@ jobs:
           | docker login --username AWS --password-stdin ${{ secrets.ECR_REGISTRY }}
 
       - name: Build Docker Image
-        run: docker build -t ${{ secrets.ECR_REPOSITORY }} .
+        run: |
+          IMAGE_TAG=${{ github.sha }}
+          docker build -t ${{ secrets.ECR_REPOSITORY }}:$IMAGE_TAG .
 
       - name: Tag Docker Image
-        run: docker tag ${{ secrets.ECR_REPOSITORY }}:latest ${{ secrets.ECR_REGISTRY }}/${{ secrets.ECR_REPOSITORY }}:latest
+        run: |
+          IMAGE_TAG=${{ github.sha }}
+          docker tag ${{ secrets.ECR_REPOSITORY }}:$IMAGE_TAG ${{ secrets.ECR_REGISTRY }}/${{ secrets.ECR_REPOSITORY }}:$IMAGE_TAG
 
       - name: Push to ECR
-        run: docker push ${{ secrets.ECR_REGISTRY }}/${{ secrets.ECR_REPOSITORY }}:latest
+        run: |
+          IMAGE_TAG=${{ github.sha }}
+          docker push ${{ secrets.ECR_REGISTRY }}/${{ secrets.ECR_REPOSITORY }}:$IMAGE_TAG
 
       - name: Install AWS SAM CLI
         uses: aws-actions/setup-sam@v2
 
       - name: Deploy with SAM
         run: |
+          IMAGE_TAG=${{ github.sha }}
           sam deploy \
             --template-file template.yaml \
             --stack-name ecs-express-api-stack \
@@ -51,16 +58,23 @@ jobs:
               SecurityGroup=${{ secrets.SECURITY_GROUP }} \
               EcrRegistry=${{ secrets.ECR_REGISTRY }} \
               EcrRepository=${{ secrets.ECR_REPOSITORY }} \
-              AwsRegion=${{ secrets.AWS_REGION }}
+              AwsRegion=${{ secrets.AWS_REGION }} \
+              ImageTag=$IMAGE_TAG
 
-      - name: Force new ECS deployment
+      - name: Fetch ALB DNS from CloudFormation
+        id: alb-dns
         run: |
-          CLUSTER_NAME="ecs-express-cluster"
-          SERVICE_NAME=$(aws ecs list-services --cluster $CLUSTER_NAME --query 'serviceArns[0]' --output text)
-          
-          echo "Forcing new deployment of $SERVICE_NAME in $CLUSTER_NAME..."
-          
-          aws ecs update-service \
-            --cluster $CLUSTER_NAME \
-            --service $SERVICE_NAME \
-            --force-new-deployment
+          DNS=$(aws cloudformation describe-stacks \
+            --stack-name ecs-express-api-stack \
+            --region ${{ secrets.AWS_REGION }} \
+            --query "Stacks[0].Outputs[?OutputKey=='LoadBalancerDNS'].OutputValue" \
+            --output text)
+          echo "alb_dns=$DNS" >> $GITHUB_OUTPUT
+          echo "Application Load Balancer DNS: $DNS"
+
+      - name: Show API Endpoint
+        run: |
+          echo "==========================================="
+          echo " Your ECS Express API is available at:"
+          echo "   http://${{ steps.alb-dns.outputs.alb_dns }}/health"
+          echo "==========================================="
