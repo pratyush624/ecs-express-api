@@ -1,5 +1,5 @@
 AWSTemplateFormatVersion: '2010-09-09'
-Description: ECS Fargate Service for Node.js Express API
+Description: ECS Fargate Service for Node.js Express API with ALB health checks
 
 Parameters:
   VpcId:
@@ -52,6 +52,11 @@ Resources:
           Essential: true
           PortMappings:
             - ContainerPort: 3000
+          Environment:
+            - Name: PORT
+              Value: "3000"
+            - Name: APP_NAME
+              Value: "ecs-express-api"
 
   LoadBalancer:
     Type: AWS::ElasticLoadBalancingV2::LoadBalancer
@@ -77,6 +82,10 @@ Resources:
       HealthCheckPath: /health
       Matcher:
         HttpCode: 200
+      HealthyThresholdCount: 2
+      UnhealthyThresholdCount: 3
+      HealthCheckIntervalSeconds: 15
+      HealthCheckTimeoutSeconds: 5
 
   Listener:
     Type: AWS::ElasticLoadBalancingV2::Listener
