@@ -1,3 +1,6 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: ECS Fargate Service for Node.js Express API
+
 Parameters:
   VpcId:
     Type: String
@@ -7,69 +10,88 @@ Parameters:
     Type: String
   SecurityGroup:
     Type: String
-  ImageUri:
+  EcrRegistry:
     Type: String
+  EcrRepository:
+    Type: String
+  AwsRegion:
+    Type: String
+  ImageTag:
+    Type: String
+    Description: "Docker image tag (commit SHA)"
 
 Resources:
   Cluster:
     Type: AWS::ECS::Cluster
-
-  LogGroup:
-    Type: AWS::Logs::LogGroup
     Properties:
-      LogGroupName: /ecs/express-api
-      RetentionInDays: 7  # keep logs for 7 days
+      ClusterName: ecs-express-cluster
+
+  TaskExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
 
   TaskDefinition:
     Type: AWS::ECS::TaskDefinition
     Properties:
-      Family: express-task
+      Family: ecs-express-task
       Cpu: '256'
       Memory: '512'
       NetworkMode: awsvpc
       RequiresCompatibilities:
         - FARGATE
-      ExecutionRoleArn: arn:aws:iam::864981759262:role/ecsTaskExecutionRole
+      ExecutionRoleArn: !GetAtt TaskExecutionRole.Arn
       ContainerDefinitions:
-        - Name: express-container
-          Image: !Ref ImageUri
+        - Name: ecs-express-container
+          Image: !Sub "${EcrRegistry}/${EcrRepository}:${ImageTag}"
+          Essential: true
           PortMappings:
             - ContainerPort: 3000
-          Environment:
-            - Name: PORT
-              Value: "3000"
-          LogConfiguration:                # ✅ CloudWatch logs enabled
+          LogConfiguration:
             LogDriver: awslogs
             Options:
               awslogs-group: !Ref LogGroup
-              awslogs-region: !Ref AWS::Region
+              awslogs-region: !Ref AwsRegion
               awslogs-stream-prefix: ecs
+
+  LogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: /ecs/ecs-express-api
+      RetentionInDays: 7
 
   LoadBalancer:
     Type: AWS::ElasticLoadBalancingV2::LoadBalancer
     Properties:
-      Name: express-alb
-      Scheme: internet-facing
+      Name: ecs-express-lb
       Subnets:
         - !Ref Subnet1
         - !Ref Subnet2
       SecurityGroups:
         - !Ref SecurityGroup
+      Scheme: internet-facing
+      Type: application
 
   TargetGroup:
     Type: AWS::ElasticLoadBalancingV2::TargetGroup
     Properties:
-      Name: express-tg
+      VpcId: !Ref VpcId
       Port: 3000
       Protocol: HTTP
       TargetType: ip
-      VpcId: !Ref VpcId
       HealthCheckPath: /health
       HealthCheckIntervalSeconds: 30
+      HealthCheckTimeoutSeconds: 5
       HealthyThresholdCount: 2
-      UnhealthyThresholdCount: 5
-      Matcher:
-        HttpCode: 200
+      UnhealthyThresholdCount: 2
 
   Listener:
     Type: AWS::ElasticLoadBalancingV2::Listener
@@ -83,31 +105,27 @@ Resources:
 
   Service:
     Type: AWS::ECS::Service
+    DependsOn: Listener
     Properties:
       Cluster: !Ref Cluster
-      DesiredCount: 1
       LaunchType: FARGATE
-      DeploymentConfiguration:
-        MaximumPercent: 200
-        MinimumHealthyPercent: 50
+      DesiredCount: 1
+      TaskDefinition: !Ref TaskDefinition
+      HealthCheckGracePeriodSeconds: 30
       NetworkConfiguration:
         AwsvpcConfiguration:
           AssignPublicIp: ENABLED
+          SecurityGroups:
+            - !Ref SecurityGroup
           Subnets:
             - !Ref Subnet1
             - !Ref Subnet2
-          SecurityGroups:
-            - !Ref SecurityGroup
-      TaskDefinition: !Ref TaskDefinition
       LoadBalancers:
-        - TargetGroupArn: !Ref TargetGroup
-          ContainerName: express-container
+        - ContainerName: ecs-express-container
           ContainerPort: 3000
+          TargetGroupArn: !Ref TargetGroup
 
 Outputs:
-  LoadBalancerDNSName:
-    Description: Public URL of the load balancer
+  LoadBalancerDNS:
+    Description: Public endpoint for the API
     Value: !GetAtt LoadBalancer.DNSName
-  CloudWatchLogGroup:
-    Description: Log group for ECS container logs
-    Value: !Ref LogGroup
