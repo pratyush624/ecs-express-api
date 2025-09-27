@@ -43,6 +43,7 @@ jobs:
             --stack-name ecs-express-api-stack \
             --capabilities CAPABILITY_IAM \
             --region ${{ secrets.AWS_REGION }} \
+            --no-fail-on-empty-changeset \
             --parameter-overrides \
               VpcId=${{ secrets.VPC_ID }} \
               Subnet1=${{ secrets.SUBNET_1 }} \
@@ -51,3 +52,15 @@ jobs:
               EcrRegistry=${{ secrets.ECR_REGISTRY }} \
               EcrRepository=${{ secrets.ECR_REPOSITORY }} \
               AwsRegion=${{ secrets.AWS_REGION }}
+
+      - name: Force new ECS deployment
+        run: |
+          CLUSTER_NAME="ecs-express-cluster"
+          SERVICE_NAME=$(aws ecs list-services --cluster $CLUSTER_NAME --query 'serviceArns[0]' --output text)
+          
+          echo "Forcing new deployment of $SERVICE_NAME in $CLUSTER_NAME..."
+          
+          aws ecs update-service \
+            --cluster $CLUSTER_NAME \
+            --service $SERVICE_NAME \
+            --force-new-deployment
