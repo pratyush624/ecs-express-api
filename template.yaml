@@ -1,5 +1,5 @@
 AWSTemplateFormatVersion: '2010-09-09'
-Description: ECS Fargate Service for Node.js Express API with ALB health checks (commit SHA tagging)
+Description: ECS Fargate Service for Node.js Express API with Logging
 
 Parameters:
   VpcId:
@@ -16,9 +16,6 @@ Parameters:
     Type: String
   AwsRegion:
     Type: String
-  ImageTag:
-    Type: String
-    Description: "Unique Docker image tag (commit SHA)"
 
 Resources:
   Cluster:
@@ -38,6 +35,13 @@ Resources:
             Action: sts:AssumeRole
       ManagedPolicyArns:
         - arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
+        - arn:aws:iam::aws:policy/CloudWatchLogsFullAccess
+
+  LogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: /ecs/ecs-express-api
+      RetentionInDays: 7
 
   TaskDefinition:
     Type: AWS::ECS::TaskDefinition
@@ -51,15 +55,16 @@ Resources:
       ExecutionRoleArn: !GetAtt TaskExecutionRole.Arn
       ContainerDefinitions:
         - Name: ecs-express-container
-          Image: !Sub "${EcrRegistry}/${EcrRepository}:${ImageTag}"
+          Image: !Sub "${EcrRegistry}/${EcrRepository}:latest"
           Essential: true
           PortMappings:
             - ContainerPort: 3000
-          Environment:
-            - Name: PORT
-              Value: "3000"
-            - Name: APP_NAME
-              Value: "ecs-express-api"
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref LogGroup
+              awslogs-region: !Ref AwsRegion
+              awslogs-stream-prefix: ecs
 
   LoadBalancer:
     Type: AWS::ElasticLoadBalancingV2::LoadBalancer
@@ -80,15 +85,11 @@ Resources:
       Port: 3000
       Protocol: HTTP
       TargetType: ip
-      HealthCheckProtocol: HTTP
-      HealthCheckPort: "3000"
       HealthCheckPath: /health
-      Matcher:
-        HttpCode: 200
-      HealthyThresholdCount: 2
-      UnhealthyThresholdCount: 3
-      HealthCheckIntervalSeconds: 15
+      HealthCheckIntervalSeconds: 30
       HealthCheckTimeoutSeconds: 5
+      HealthyThresholdCount: 2
+      UnhealthyThresholdCount: 2
 
   Listener:
     Type: AWS::ElasticLoadBalancingV2::Listener
