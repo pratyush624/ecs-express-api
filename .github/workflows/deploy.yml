@@ -25,17 +25,18 @@ jobs:
           | docker login --username AWS --password-stdin ${{ secrets.ECR_REGISTRY }}
 
       - name: Build Docker Image
-        run: docker build -t ${{ secrets.ECR_REPOSITORY }} .
-
-      - name: Tag Docker Image
         run: |
           IMAGE_TAG=${{ github.sha }}
+          # build with both SHA and latest tags
+          docker build -t ${{ secrets.ECR_REPOSITORY }}:$IMAGE_TAG -t ${{ secrets.ECR_REPOSITORY }}:latest .
+
+      - name: Tag & Push to ECR
+        run: |
+          IMAGE_TAG=${{ github.sha }}
+          # tag images for ECR
           docker tag ${{ secrets.ECR_REPOSITORY }}:$IMAGE_TAG ${{ secrets.ECR_REGISTRY }}/${{ secrets.ECR_REPOSITORY }}:$IMAGE_TAG
-          docker tag ${{ secrets.ECR_REPOSITORY }}:$IMAGE_TAG ${{ secrets.ECR_REGISTRY }}/${{ secrets.ECR_REPOSITORY }}:latest
-
-      - name: Push to ECR
-        run: |
-          IMAGE_TAG=${{ github.sha }}
+          docker tag ${{ secrets.ECR_REPOSITORY }}:latest ${{ secrets.ECR_REGISTRY }}/${{ secrets.ECR_REPOSITORY }}:latest
+          # push both tags
           docker push ${{ secrets.ECR_REGISTRY }}/${{ secrets.ECR_REPOSITORY }}:$IMAGE_TAG
           docker push ${{ secrets.ECR_REGISTRY }}/${{ secrets.ECR_REPOSITORY }}:latest
 
@@ -44,6 +45,7 @@ jobs:
 
       - name: Deploy with SAM
         run: |
+          IMAGE_TAG=${{ github.sha }}
           sam deploy \
             --template-file template.yaml \
             --stack-name ecs-express-api-stack \
