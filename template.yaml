@@ -1,5 +1,5 @@
 AWSTemplateFormatVersion: '2010-09-09'
-Description: ECS Fargate Service for Node.js Express API
+Description: ECS Fargate Service for Node.js Express API with ALB + Security Groups
 
 Parameters:
   VpcId:
@@ -8,17 +8,12 @@ Parameters:
     Type: String
   Subnet2:
     Type: String
-  SecurityGroup:
-    Type: String
   EcrRegistry:
     Type: String
   EcrRepository:
     Type: String
   AwsRegion:
     Type: String
-  ImageTag:
-    Type: String
-    Description: "Docker image tag (commit SHA)"
 
 Resources:
   Cluster:
@@ -39,6 +34,12 @@ Resources:
       ManagedPolicyArns:
         - arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
 
+  LogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: /ecs/ecs-express-api
+      RetentionInDays: 7
+
   TaskDefinition:
     Type: AWS::ECS::TaskDefinition
     Properties:
@@ -51,7 +52,7 @@ Resources:
       ExecutionRoleArn: !GetAtt TaskExecutionRole.Arn
       ContainerDefinitions:
         - Name: ecs-express-container
-          Image: !Sub "${EcrRegistry}/${EcrRepository}:${ImageTag}"
+          Image: !Sub "${EcrRegistry}/${EcrRepository}:latest"
           Essential: true
           PortMappings:
             - ContainerPort: 3000
@@ -62,11 +63,27 @@ Resources:
               awslogs-region: !Ref AwsRegion
               awslogs-stream-prefix: ecs
 
-  LogGroup:
-    Type: AWS::Logs::LogGroup
+  AlbSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
     Properties:
-      LogGroupName: /ecs/ecs-express-api
-      RetentionInDays: 7
+      GroupDescription: Allow HTTP traffic from internet to ALB
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+
+  EcsSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Allow ECS tasks traffic from ALB
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 3000
+          ToPort: 3000
+          SourceSecurityGroupId: !Ref AlbSecurityGroup
 
   LoadBalancer:
     Type: AWS::ElasticLoadBalancingV2::LoadBalancer
@@ -76,7 +93,7 @@ Resources:
         - !Ref Subnet1
         - !Ref Subnet2
       SecurityGroups:
-        - !Ref SecurityGroup
+        - !Ref AlbSecurityGroup
       Scheme: internet-facing
       Type: application
 
@@ -88,10 +105,8 @@ Resources:
       Protocol: HTTP
       TargetType: ip
       HealthCheckPath: /health
-      HealthCheckIntervalSeconds: 30
-      HealthCheckTimeoutSeconds: 5
-      HealthyThresholdCount: 2
-      UnhealthyThresholdCount: 2
+      Matcher:
+        HttpCode: 200
 
   Listener:
     Type: AWS::ElasticLoadBalancingV2::Listener
@@ -111,12 +126,11 @@ Resources:
       LaunchType: FARGATE
       DesiredCount: 1
       TaskDefinition: !Ref TaskDefinition
-      HealthCheckGracePeriodSeconds: 30
       NetworkConfiguration:
         AwsvpcConfiguration:
           AssignPublicIp: ENABLED
           SecurityGroups:
-            - !Ref SecurityGroup
+            - !Ref EcsSecurityGroup
           Subnets:
             - !Ref Subnet1
             - !Ref Subnet2
